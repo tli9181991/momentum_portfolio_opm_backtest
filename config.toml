@@ -1,0 +1,84 @@
+# ---------------------------------------------------------------------------
+# Runtime configuration for the QQQ momentum backtest.
+#
+# Every key here overrides the matching field default in config.py. Keys must
+# be named exactly like the Config fields -- a typo is reported as an error
+# rather than silently ignored. The [tables] are for readability only; they
+# are flattened before being applied, so you can move a key between tables
+# freely. Delete this file (or any key in it) to fall back to the defaults.
+# ---------------------------------------------------------------------------
+
+[data]
+# Where price history comes from: "ib" or "yfinance".
+#   ib        Interactive Brokers. Needs TWS or IB Gateway running locally with
+#             API access enabled, plus a market-data subscription. Rate-limited,
+#             but it is the same data you would actually trade on.
+#   yfinance  Yahoo Finance via the `yfinance` package. No login, no gateway,
+#             no subscription -- handy for development, but best-effort quality
+#             with no SLA.
+# Aliases: ibkr / tws -> ib,  yahoo / yf -> yfinance.
+# Override for a single run with:  python main.py --source yfinance
+data_source = "ib"
+
+# Bars fetched are cached to <cache_dir>/<source>/<SYMBOL>.csv, so the two
+# backends never mix their data. `python main.py --refresh` re-downloads.
+cache_dir = "./data_cache"
+
+[ibkr]
+# TWS/IB Gateway socket. Ports: 7497 = TWS paper, 7496 = TWS live,
+# 4002 = IB Gateway paper, 4001 = IB Gateway live.
+ibkr_host = "127.0.0.1"
+ibkr_port = 7497
+ibkr_client_id = 17
+# Seconds between live historical-data requests. IBKR permits roughly 6 per
+# 2 seconds before it starts rejecting for pacing violations.
+ibkr_pacing_delay_sec = 1.2
+
+# How much history to pull, and in what form.
+fetch_duration_str = "5 Y"          # backtest_years + warmup_years, rounded up
+bar_size = "1 day"
+what_to_show = "ADJUSTED_LAST"      # split- and dividend-adjusted closes
+
+[yfinance]
+# The same three settings, in the arguments yfinance takes.
+yf_period = "5y"                    # 1y / 2y / 5y / 10y / max
+yf_auto_adjust = true               # analogue of ADJUSTED_LAST
+yf_pacing_delay_sec = 0.0           # raise above 0 if Yahoo throttles you
+
+[backtest]
+backtest_years = 3
+warmup_years = 1.5
+initial_capital = 28000.0
+txn_cost_bps = 5.0                  # per trade leg, spread + slippage
+risk_free_rate_annual = 0.0
+
+[universe]
+benchmark_ticker = "SPY"            # relative-strength benchmark
+compare_ticker = "QQQ"              # what the strategy is displayed against
+
+[portfolio]
+max_positions = 20
+rebalance_mode = "full_equal_weight"        # or "entries_exits_only"
+position_sizing = "fixed_slot"              # or "equal_weight_of_qualifiers"
+
+[trend_template]
+sma_short = 50
+sma_mid = 150
+sma_long = 200
+sma_long_uptrend_lookback_days = 21
+pct_above_52w_low_min = 30.0
+pct_below_52w_high_max = 25.0
+exit_on_close_below_sma_long = true
+
+[base]
+base_lookback_weeks = 10
+base_max_range_pct = 35.0
+
+[relative_strength]
+rs_lookback_days = [63, 126, 189, 252]      # ~3, 6, 9, 12 months
+rs_weights = [0.4, 0.2, 0.2, 0.2]           # most recent quarter weighted heaviest
+
+[liquidity]
+min_price = 10.0
+min_avg_volume = 200000
+avg_volume_lookback_days = 50

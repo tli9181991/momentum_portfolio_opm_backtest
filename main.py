@@ -1,10 +1,16 @@
 """
 Run with:  python main.py
 
-Requires TWS or IB Gateway running locally with API access enabled
-(see README.md). First run will be slow (fetching ~103 symbols x 5 years
-of daily bars from IBKR); subsequent runs read from ./data_cache/ unless
-you delete it or pass --refresh.
+Settings live in config.toml -- including which data source to use:
+
+    [data]
+    data_source = "ib"        # or "yfinance"
+
+The "ib" source requires TWS or IB Gateway running locally with API access
+enabled (see README.md); "yfinance" needs neither, just `pip install yfinance`.
+Override for one run with --source. First run is slow (fetching ~103 symbols
+x 5 years of daily bars); later runs read from ./data_cache/<source>/ unless
+you pass --refresh.
 """
 
 import argparse
@@ -13,7 +19,7 @@ import sys
 import matplotlib.pyplot as plt
 
 from config import Config
-import ibkr_data as ibd
+from datasource import create_data_source
 import backtest as bt
 from qqq_universe import get_qqq_universe
 
@@ -21,26 +27,31 @@ from qqq_universe import get_qqq_universe
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--refresh", action="store_true",
-                         help="Ignore local cache and re-fetch all data from IBKR")
+                         help="Ignore local cache and re-fetch all data")
+    parser.add_argument("--source", choices=["ib", "yfinance"],
+                         help="Data source for this run, overriding "
+                              "data_source in config.toml")
+    parser.add_argument("--config", default=None,
+                         help="Path to the TOML config file (default: config.toml)")
     args = parser.parse_args()
 
-    cfg = Config()
+    cfg = Config.load(args.config)
     universe = get_qqq_universe()
+    use_cache = not args.refresh
 
-    print(f"Connecting to IBKR at {cfg.ibkr_host}:{cfg.ibkr_port} ...")
-    ib = ibd.connect(cfg)
+    source = create_data_source(cfg, override=args.source)
+    print(f"Data source: {source.name}")
 
-    print(f"Fetching benchmark ({cfg.benchmark_ticker}) and comparison "
-          f"({cfg.compare_ticker}) data ...")
-    bench_df = ibd.fetch_daily_bars(ib, cfg, cfg.benchmark_ticker, use_cache=not args.refresh)
-    compare_df = ibd.fetch_daily_bars(ib, cfg, cfg.compare_ticker, use_cache=not args.refresh)
+    with source:
+        print(f"Fetching benchmark ({cfg.benchmark_ticker}) and comparison "
+              f"({cfg.compare_ticker}) data ...")
+        bench_df = source.fetch_daily_bars(cfg.benchmark_ticker, use_cache=use_cache)
+        compare_df = source.fetch_daily_bars(cfg.compare_ticker, use_cache=use_cache)
 
-    print(f"Fetching {len(universe)} QQQ constituent symbols "
-          f"(this can take a while on first run) ...")
-    raw_data = ibd.fetch_universe_bars(ib, cfg, universe, use_cache=not args.refresh)
-    print(f"  got data for {len(raw_data)}/{len(universe)} symbols")
-
-    ib.disconnect()
+        print(f"Fetching {len(universe)} QQQ constituent symbols "
+              f"(this can take a while on first run) ...")
+        raw_data = source.fetch_universe_bars(universe, use_cache=use_cache)
+        print(f"  got data for {len(raw_data)}/{len(universe)} symbols")
 
     print("Running backtest ...")
     result = bt.run_backtest(raw_data, bench_df, compare_df, cfg)

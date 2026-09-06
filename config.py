@@ -11,14 +11,34 @@ from QQQ (bankrupt, acquired, delisted, demoted) during the backtest period
 are NOT included, which will overstate the strategy's historical returns
 versus what a real point-in-time investor would have experienced. This was
 a deliberate simplification choice -- see README.md.
+
+These are the DEFAULTS. Anything here can be overridden without touching
+code by editing config.toml next to this file -- see Config.load() at the
+bottom and the comments in config.toml itself.
 """
 
-from dataclasses import dataclass, field
-from datetime import date
+from __future__ import annotations
+
+import os
+import tomllib
+from dataclasses import dataclass, fields
+
+DEFAULT_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "config.toml")
 
 
 @dataclass
 class Config:
+    # ---------------------------------------------------------------
+    # Data source: where price history comes from.
+    #   "ib"       -- Interactive Brokers (needs TWS/IB Gateway running and
+    #                 a market-data subscription); authoritative, rate-limited.
+    #   "yfinance" -- Yahoo Finance (no login, no subscription); convenient
+    #                 for development, best-effort quality.
+    # Aliases accepted: ibkr/tws -> ib, yahoo/yf -> yfinance.
+    # ---------------------------------------------------------------
+    data_source: str = "ib"
+
     # ---------------------------------------------------------------
     # IBKR connection (TWS or IB Gateway must be running and API access
     # enabled: File > Global Configuration > API > Settings)
@@ -27,6 +47,9 @@ class Config:
     ibkr_port: int = 7497          # 7497 = TWS paper, 7496 = TWS live,
                                     # 4002 = IB Gateway paper, 4001 = IB Gateway live
     ibkr_client_id: int = 17
+    ibkr_pacing_delay_sec: float = 1.2   # sleep between live historical-data
+                                          # requests; IBKR allows roughly 6 per
+                                          # 2 seconds before pacing violations
 
     # ---------------------------------------------------------------
     # Backtest window
@@ -39,6 +62,14 @@ class Config:
                                         # (backtest_years + warmup_years, rounded up)
     bar_size: str = "1 day"
     what_to_show: str = "ADJUSTED_LAST"   # splits/dividends adjusted close
+
+    # yfinance equivalents of the three IBKR fetch settings above (the two
+    # backends take different arguments for the same idea)
+    yf_period: str = "5y"              # history window: 1y/2y/5y/10y/max
+    yf_auto_adjust: bool = True        # split- AND dividend-adjusted OHLC,
+                                        # i.e. the analogue of ADJUSTED_LAST
+    yf_pacing_delay_sec: float = 0.0   # Yahoo needs no pacing under normal
+                                        # use; raise it if you get throttled
 
     # ---------------------------------------------------------------
     # Universe
@@ -116,3 +147,50 @@ class Config:
     risk_free_rate_annual: float = 0.0   # used for Sharpe ratio; set to
                                           # your T-bill/BOXX-equivalent yield
                                           # if you want excess-return Sharpe
+
+    # ---------------------------------------------------------------
+    # Loading overrides from config.toml
+    # ---------------------------------------------------------------
+    @classmethod
+    def load(cls, path: str | None = None, required: bool = False) -> "Config":
+        """
+        Build a Config from the defaults above, overlaid with any values set
+        in config.toml.
+
+        The TOML file is organised into tables purely for readability -- they
+        are flattened before matching, so every key must be named exactly like
+        a field on this class, and an unknown key is an error rather than a
+        silently ignored typo. If the file is absent, the defaults are used
+        (unless required=True).
+        """
+        path = path or DEFAULT_CONFIG_FILE
+        if not os.path.exists(path):
+            if required:
+                raise FileNotFoundError(f"Config file not found: {path}")
+            return cls()
+
+        with open(path, "rb") as fh:
+            raw = tomllib.load(fh)
+
+        flat: dict = {}
+        for key, value in raw.items():
+            if isinstance(value, dict):        # a [table] -- flatten one level
+                for sub_key, sub_value in value.items():
+                    flat[sub_key] = sub_value
+            else:                              # a top-level key
+                flat[key] = value
+
+        valid = {f.name: f for f in fields(cls)}
+        unknown = sorted(set(flat) - set(valid))
+        if unknown:
+            raise ValueError(
+                f"Unknown setting(s) in {path}: {', '.join(unknown)}. "
+                f"Keys must match Config field names."
+            )
+
+        # TOML has no tuple type; the tuple-typed fields arrive as lists.
+        for key, value in flat.items():
+            if valid[key].type is tuple or valid[key].type == "tuple":
+                flat[key] = tuple(value)
+
+        return cls(**flat)

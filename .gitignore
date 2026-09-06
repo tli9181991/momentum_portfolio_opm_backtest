@@ -1,0 +1,16 @@
+# Cached price bars (per data source)
+data_cache/
+
+# Backtest outputs
+equity_curve.csv
+trade_log.csv
+backtest_result.png
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store

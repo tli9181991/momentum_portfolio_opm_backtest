@@ -1,4 +1,9 @@
-ib_async>=1.0.0   # maintained fork of ib_insync; use ib_insync instead if you prefer
 pandas>=2.0
 numpy>=1.24
 matplotlib>=3.7
+
+# Data sources -- install whichever backend(s) you set in config.toml.
+# You only need the one you actually use.
+ib_async>=1.0.0   # data_source = "ib"; maintained fork of ib_insync
+                  # (use ib_insync instead if you prefer the original)
+yfinance>=0.2.40  # data_source = "yfinance"
