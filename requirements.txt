@@ -1,0 +1,4 @@
+ib_async>=1.0.0   # maintained fork of ib_insync; use ib_insync instead if you prefer
+pandas>=2.0
+numpy>=1.24
+matplotlib>=3.7
