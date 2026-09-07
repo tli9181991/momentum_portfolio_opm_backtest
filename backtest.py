@@ -71,6 +71,15 @@ def run_backtest(raw_data: dict[str, pd.DataFrame], bench_df: pd.DataFrame,
     equity_curve = []
     turnover_notional = 0.0
 
+    # Diagnostics for downstream analysis / plotting. None of this feeds back
+    # into the simulation -- it just records what the engine already decided,
+    # so a notebook can show *why* a name was picked and how capital ended up
+    # allocated, instead of re-deriving the screen from scratch.
+    screen_log: list[dict] = []       # every symbol evaluated, every rebalance
+    rebalance_log: list[dict] = []    # one summary row per rebalance date
+    allocation_log: list[dict] = []   # the target book set on each rebalance
+    holdings_log: list[dict] = []     # daily mark-to-market, position by position
+
     for day_pos_in_sim, current_date in enumerate(sim_dates):
         i = master_dates.get_loc(current_date)  # absolute index into full series
 
@@ -98,26 +107,55 @@ def run_backtest(raw_data: dict[str, pd.DataFrame], bench_df: pd.DataFrame,
         # --- 2. Monthly rebalance: rescreen + reweight ---
         if rebal_flags[day_pos_in_sim]:
             candidates = []
+            screened_today = []
             for sym in symbols:
                 if i >= len(ind[sym]):
                     continue
                 row = ind[sym].iloc[i]
                 prev_long = ind[sym]["sma_long"].iloc[max(0, i - cfg.sma_long_uptrend_lookback_days)]
-                if not sig.trend_template_pass(row, prev_long, cfg):
-                    continue
-                if not sig.base_is_tight(row, cfg):
-                    continue
-                if not sig.liquidity_ok(row, cfg):
-                    continue
+                # Each filter is evaluated on its own rather than short-circuited,
+                # so the log can show which specific rule rejected a name. The
+                # conjunction below is the same screen as before.
+                pass_trend = sig.trend_template_pass(row, prev_long, cfg)
+                pass_base = sig.base_is_tight(row, cfg)
+                pass_liquidity = sig.liquidity_ok(row, cfg)
                 rs = sig.relative_strength_score(
                     ind[sym]["close"], bench_ind["close"], i, cfg
                 )
-                if np.isnan(rs):
-                    continue
-                candidates.append((sym, rs))
+                qualified = (pass_trend and pass_base and pass_liquidity
+                             and not np.isnan(rs))
+                screened_today.append(
+                    {"date": current_date, "symbol": sym, "close": row["close"],
+                     "pass_trend_template": pass_trend,
+                     "pass_tight_base": pass_base,
+                     "pass_liquidity": pass_liquidity,
+                     "rs_score": rs,
+                     "qualified": qualified,
+                     "pct_below_52w_high": row["pct_below_52w_high"],
+                     "pct_above_52w_low": row["pct_above_52w_low"],
+                     "base_range_pct": row["base_range_pct"],
+                     "avg_volume": row["avg_volume"]}
+                )
+                if qualified:
+                    candidates.append((sym, rs))
 
             candidates.sort(key=lambda x: x[1], reverse=True)
             target_symbols = [s for s, _ in candidates[: cfg.max_positions]]
+
+            rs_rank = {sym: rank for rank, (sym, _) in enumerate(candidates, start=1)}
+            chosen = set(target_symbols)
+            for rec in screened_today:
+                rec["rs_rank"] = rs_rank.get(rec["symbol"], np.nan)
+                rec["selected"] = rec["symbol"] in chosen
+            screen_log.extend(screened_today)
+
+            # Cumulative funnel: each stage counts names that passed it *and*
+            # every stage before it, which is what the screen actually requires.
+            n_trend = sum(r["pass_trend_template"] for r in screened_today)
+            n_base = sum(r["pass_trend_template"] and r["pass_tight_base"]
+                         for r in screened_today)
+            n_liquidity = sum(r["pass_trend_template"] and r["pass_tight_base"]
+                              and r["pass_liquidity"] for r in screened_today)
 
             if cfg.rebalance_mode != "full_equal_weight":
                 raise NotImplementedError(
@@ -142,6 +180,7 @@ def run_backtest(raw_data: dict[str, pd.DataFrame], bench_df: pd.DataFrame,
                     )
 
             n = len(target_symbols)
+            capital_at_rebalance = portfolio.cash
             if n > 0:
                 total_value = portfolio.cash
                 if cfg.position_sizing == "fixed_slot":
@@ -161,7 +200,30 @@ def run_backtest(raw_data: dict[str, pd.DataFrame], bench_df: pd.DataFrame,
                         {"date": current_date, "symbol": sym, "action": "BUY_REBAL",
                          "shares": shares, "price": price}
                     )
+                    allocation_log.append(
+                        {"date": current_date, "symbol": sym,
+                         "rs_rank": rs_rank.get(sym, np.nan),
+                         "rs_score": dict(candidates).get(sym, np.nan),
+                         "price": price, "shares": shares,
+                         "target_value": spend,
+                         "weight": spend / capital_at_rebalance
+                         if capital_at_rebalance > 0 else np.nan}
+                    )
             # else: nothing qualified this month -- stay in cash
+
+            rebalance_log.append(
+                {"date": current_date,
+                 "n_universe": len(screened_today),
+                 "n_pass_trend_template": n_trend,
+                 "n_pass_tight_base": n_base,
+                 "n_pass_liquidity": n_liquidity,
+                 "n_qualified": len(candidates),
+                 "n_selected": len(portfolio.positions),
+                 "capital": capital_at_rebalance,
+                 "cash_after": portfolio.cash,
+                 "cash_weight": portfolio.cash / capital_at_rebalance
+                 if capital_at_rebalance > 0 else np.nan}
+            )
 
         # --- 3. Mark to market ---
         equity_curve.append(
@@ -169,7 +231,15 @@ def run_backtest(raw_data: dict[str, pd.DataFrame], bench_df: pd.DataFrame,
              "n_positions": len(portfolio.positions)}
         )
 
+        day_holdings = {"date": current_date, "CASH": portfolio.cash}
+        for sym, shares in portfolio.positions.items():
+            price = prices_today.get(sym)
+            if price is not None and not np.isnan(price):
+                day_holdings[sym] = shares * price
+        holdings_log.append(day_holdings)
+
     equity_df = pd.DataFrame(equity_curve).set_index("date")
+    holdings_df = pd.DataFrame(holdings_log).set_index("date").fillna(0.0)
 
     # --- Buy & hold comparison over the same measured window ---
     cmp_window = compare_ind.loc[compare_ind.index >= start_date, "close"].dropna()
@@ -181,6 +251,11 @@ def run_backtest(raw_data: dict[str, pd.DataFrame], bench_df: pd.DataFrame,
         "benchmark_curve": cmp_curve,
         "trade_log": pd.DataFrame(portfolio.trade_log),
         "turnover_notional": turnover_notional,
+        # Diagnostics -- see the block where they are collected above.
+        "screen_log": pd.DataFrame(screen_log),
+        "rebalance_log": pd.DataFrame(rebalance_log),
+        "allocation_log": pd.DataFrame(allocation_log),
+        "holdings_value": holdings_df,
     }
 
 

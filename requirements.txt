@@ -7,3 +7,6 @@ matplotlib>=3.7
 ib_async>=1.0.0   # data_source = "ib"; maintained fork of ib_insync
                   # (use ib_insync instead if you prefer the original)
 yfinance>=0.2.40  # data_source = "yfinance"
+
+# Optional -- only for visualize_backtest.ipynb
+jupyterlab>=4.0

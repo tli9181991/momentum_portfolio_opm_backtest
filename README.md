@@ -66,6 +66,19 @@ First run fetches ~100 symbols x 5 years of daily bars (a few minutes on
 sources never mixes their bars. Later runs reuse the cache; pass
 `--refresh` to force a re-download.
 
+### 5. Or step through it in a notebook
+
+```
+pip install jupyterlab
+jupyter lab visualize_backtest.ipynb
+```
+
+`visualize_backtest.ipynb` runs the same code as `main.py`, one cell at a
+time, and plots what happens at each stage: which names survive the screen
+and how they rank, what portfolio the ranking turns into, and the resulting
+profit and loss. It reads the same cache, so it costs nothing extra to run
+after `main.py`.
+
 ## Configuration
 
 `config.toml` holds every runtime setting — data source, connection
@@ -171,6 +184,8 @@ window.
 - `signals.py` — filter and scoring functions
 - `backtest.py` — the daily-stepped simulation engine
 - `main.py` — orchestration / CLI entry point
+- `visualize_backtest.ipynb` — cell-by-cell walkthrough of a run: stock
+  selection, portfolio construction, and profit and loss
 - `test_synthetic.py` — runs the engine against synthetic random-walk data
   so you can sanity-check the logic runs correctly *before* touching any
   data source at all: `python test_synthetic.py`
