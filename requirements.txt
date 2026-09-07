@@ -1,6 +1,7 @@
 pandas>=2.0
 numpy>=1.24
 matplotlib>=3.7
+scipy>=1.10      # mean-variance optimisers in mvo.py
 
 # Data sources -- install whichever backend(s) you set in config.toml.
 # You only need the one you actually use.

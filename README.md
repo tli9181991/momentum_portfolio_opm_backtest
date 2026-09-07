@@ -79,6 +79,12 @@ and how they rank, what portfolio the ranking turns into, and the resulting
 profit and loss. It reads the same cache, so it costs nothing extra to run
 after `main.py`.
 
+Its last part runs a **second, independent** strategy on the same data: the
+mean-variance walk-forward from `M6_finalnotebook.ipynb` (max-Sharpe,
+minimum-volatility and risk-parity books solved monthly from the covariance
+matrix), and puts it head to head with the equal-weight momentum strategy
+and with buy & hold. The optimisers live in `mvo.py`.
+
 ## Configuration
 
 `config.toml` holds every runtime setting — data source, connection
@@ -185,7 +191,12 @@ window.
 - `backtest.py` — the daily-stepped simulation engine
 - `main.py` — orchestration / CLI entry point
 - `visualize_backtest.ipynb` — cell-by-cell walkthrough of a run: stock
-  selection, portfolio construction, and profit and loss
+  selection, portfolio construction, profit and loss, and the mean-variance
+  comparison
+- `mvo.py` — mean-variance optimisers (max Sharpe / min volatility / risk
+  parity) and the monthly walk-forward test, ported faithfully from
+  `M6_finalnotebook.ipynb`
+- `M6_finalnotebook.ipynb` — reference notebook the optimisation flow comes from
 - `test_synthetic.py` — runs the engine against synthetic random-walk data
   so you can sanity-check the logic runs correctly *before* touching any
   data source at all: `python test_synthetic.py`
